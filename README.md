@@ -10,6 +10,7 @@ publisher.py и consumer.py - приложения на python для тесто
 Кластер rabbitmq был развернут на k8s в Яндекс.облаке с помощью persistent volume До этого опыта ни с одной из технологий не имел.
 
 Использованные статьи и ресурсы:
+
 https://habr.com/ru/company/true_engineering/blog/419817/
 https://kubernetes.io/docs/concepts/configuration/assign-pod-node/
 https://zupzup.org/k8s-rabbitmq-cluster/
