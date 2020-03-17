@@ -1,0 +1,209 @@
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: rabbitmq
+---
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: Role
+metadata:
+  name: endpoint-reader
+rules:
+- apiGroups: [""]
+  resources: ["endpoints"]
+  verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: RoleBinding
+metadata:
+  name: endpoint-reader
+subjects:
+- kind: ServiceAccount
+  name: rabbitmq
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: endpoint-reader
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: rabbitmq-data
+  labels:
+    type: local
+  annotations:
+    volume.alpha.kubernetes.io/storage-class: rabbitmq-data-sigma
+spec:
+  storageClassName: rabbitmq-data-sigma
+  capacity:
+    storage: 5Gi
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Recycle
+  hostPath:
+    path: "/opt/rabbitmq-data-sigma"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: rabbitmq-data
+spec:
+  storageClassName: rabbitmq-data-sigma
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rabbitmq-internal
+  labels:
+    app: rabbitmq
+spec:
+  clusterIP: None
+  ports:
+    - name: http
+      protocol: TCP
+      port: 15672
+    - name: amqp
+      protocol: TCP
+      port: 5672
+  selector: 
+    app: rabbitmq
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rabbitmq
+  labels:
+    app: rabbitmq
+    type: LoadBalancer
+spec:
+  type: NodePort
+  ports:
+    - name: http
+      protocol: TCP
+      port: 15672
+      targetPort: 15672
+      nodePort: 31673
+    - name: amqp
+      protocol: TCP
+      port: 5672
+      targetPort: 5672
+      nodePort: 30673
+  selector:
+    app: rabbitmq
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rabbitmq-config
+data:
+  enabled_plugins: |
+      [rabbitmq_management,rabbitmq_peer_discovery_k8s].
+
+  rabbitmq.conf: |
+      cluster_formation.peer_discovery_backend = rabbit_peer_discovery_k8s
+      cluster_formation.k8s.host = 10.0.128.1
+      cluster_formation.k8s.port = 443
+      cluster_formation.k8s.address_type = hostname
+      cluster_formation.node_cleanup.interval = 10
+      cluster_formation.node_cleanup.only_log_warning = true
+      cluster_partition_handling = autoheal
+      queue_master_locator = min-masters
+      cluster_formation.randomized_startup_delay_range.min = 0
+      cluster_formation.randomized_startup_delay_range.max = 2
+      cluster_formation.k8s.service_name = rabbitmq-internal
+      cluster_formation.k8s.hostname_suffix = .rabbitmq-internal.default.svc.cluster.local
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: rabbitmq
+spec:
+  serviceName: rabbitmq-internal
+  selector:
+    matchLabels:
+      app: rabbitmq
+  replicas: 3
+  template:
+    metadata:
+      labels:
+        app: rabbitmq
+    spec:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: app
+                    operator: in
+                    values:
+                      - rabbitmq
+              topologyKey: kubernetes.io/hostname
+    spec:
+      serviceAccountName: rabbitmq
+      terminationGracePeriodSeconds: 10
+      containers:
+        - name: rabbitmq-k8s
+          image: cr.yandex/crpgbrmh3ndpqa10u6or/rabbitmq:latest
+          volumeMounts:
+            - name: config-volume
+              mountPath: /etc/rabbitmq
+            - name: rabbitmq-data
+              mountPath: /var/lib/rabbitmq/mnesia
+          ports:
+            - name: http
+              protocol: TCP
+              containerPort: 15672
+            - name: amqp
+              protocol: TCP
+              containerPort: 5672
+          livenessProbe:
+            exec:
+              command: ["rabbitmqctl", "status"]
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            timeoutSeconds: 10
+          readinessProbe:
+            exec:
+              command: ["rabbitmqctl", "status"]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 10
+          imagePullPolicy: Always
+          env:
+            - name: MY_POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: HOSTNAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: RABBITMQ_USE_LONGNAME
+              value: "true"
+            - name: RABBITMQ_NODENAME
+              value: "rabbit@$(HOSTNAME).rabbitmq-internal.$(NAMESPACE).svc.cluster.local"
+            - name: K8S_SERVICE_NAME
+              value: "rabbitmq-internal"
+            - name: RABBITMQ_ERLANG_COOKIE
+              value: "gvozdi"
+      volumes:
+        - name: config-volume
+          configMap:
+            name: rabbitmq-config
+            items:
+              - key: rabbitmq.conf
+                path: rabbitmq.conf
+              - key: enabled_plugins
+                path: enabled_plugins
+        - name: rabbitmq-data
+          persistentVolumeClaim:
+            claimName: rabbitmq-data
