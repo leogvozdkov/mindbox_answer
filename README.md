@@ -2,7 +2,6 @@
 
 Ответ на тестовое задание mindbox на вакансию junior SRE
 
-disclaimer: 
 
 rmq.yaml - файл деплоя кластера rabbitMQ
 publisher.py и consumer.py - приложения на python для тестов (певый создаёт очереди и спамит рандомными строками, второй их читает).
