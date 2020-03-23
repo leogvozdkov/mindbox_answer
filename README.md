@@ -1,4 +1,2 @@
 
-rmq.yaml - файл деплоя кластера rabbitMQ
-
-publisher.py и consumer.py - приложения на python для тестов (первый создаёт очереди и спамит рандомными строками, второй их читает).
+rmq.yaml - deploy rabbitMQ cluster in k8s
